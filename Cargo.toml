@@ -1,9 +1,10 @@
 [package]
 name = "uart"
-version = "0.1.1"
+version = "0.1.0"
 edition = "2021"
-license = "BSD-3-Clause"
-repository = "https://github.com/pyre-project/pyre/src/shared/uart/"
+license = "BSD 3-Clause"
+license-file = "LICENSE"
+repository = "https://github.com/pyre-project/uart/"
 keywords = ["uart", "uart_16550", "serial", "io", "osdev"]
 categories = ["no-std", "embedded"]
 description = "A clean implementation of the UART_16550 device functionality."
