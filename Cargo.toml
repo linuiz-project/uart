@@ -1,8 +1,8 @@
 [package]
 name = "uart"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
-license = "BSD 3-Clause"
+license = "BSD-3-Clause"
 license-file = "LICENSE"
 repository = "https://github.com/pyre-project/uart/"
 keywords = ["uart", "uart_16550", "serial", "io", "osdev"]
