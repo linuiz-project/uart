@@ -6,15 +6,10 @@
     clippy::float_arithmetic
 )]
 #![warn(clippy::cargo, clippy::pedantic, clippy::undocumented_unsafe_blocks)]
-#![allow(
-    clippy::cast_lossless,
-    clippy::enum_glob_use,
-    clippy::inline_always,
-    clippy::items_after_statements,
-    clippy::must_use_candidate,
-    clippy::unreadable_literal,
-    clippy::wildcard_imports
-)]
+#![allow(clippy::must_use_candidate, clippy::upper_case_acronyms)]
+
+#[cfg(feature = "writer")]
+pub mod writer;
 
 #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 pub use x86::*;
@@ -36,56 +31,65 @@ mod x86 {
     pub const COM4: UartAddress = UartAddress::Io(0x2E8);
 }
 
-use bit_field::BitField;
 use bitflags::bitflags;
 use core::marker::PhantomData;
 
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct InterruptEnable : u8 {
+    pub struct InterruptEnable: u8 {
         /// Interrupt when received data is available.
-        const RECEIVED_DATA = 1 << 0;
-        /// Interrupt when the transmit holding register is empty.
+        const RECEIVED_DATA  = 1 << 0;
+
+        /// Interrupt when the transmitter holding register is empty.
         const TRANSMIT_EMPTY = 1 << 1;
+
         /// Interrupt when the receiver line status register changes.
         const RECEIVE_STATUS = 1 << 2;
+
         /// Interrupt when the modem status reguster changes.
-        const MODEM_STATUS = 1 << 3;
-        /// This bit is UART 16750 -specific.
-        const SLEEP_MODE = 1 << 4;
-        /// This bit is UART 16750 -specific.
-        const LOW_POWER = 1 << 5;
-        // Bit 6 reserved
-        // Bit 7 reserved
+        const MODEM_STATUS   = 1 << 3;
+
+        // Bits 4-7 are reserved
     }
 }
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FifoSize {
-    Four = 0b01,
-    Eight = 0b10,
-    Fourteen = 0b11,
-}
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct InterruptIdent: u8 {
+        /// Indicates an interrupt is pending.
+        const INTERRUPT_PENDING = 1 << 0;
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataBits {
-    Five = 0b00,
-    Six = 0b01,
-    Seven = 0b10,
-    Eight = 0b11,
-}
+        /// Indicates a parity error, overrun error, framing error, or break interrupt.
+        ///
+        /// Reset by reading the line status register.
+        const RECV_LINE_STATUS  = 0b011 << 1;
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParityMode {
-    None = 0b000,
-    Odd = 0b001,
-    Even = 0b011,
-    High = 0b101,
-    Low = 0b111,
+        /// Indicates the FIFO trigger level has been reached.
+        ///
+        /// Reset when FIFO drops below the trigger level.
+        const RECV_DATA_AVAIL   = 0b010 << 1;
+
+        /// Indicates there's at least 1 character in the FIFO, but no character has
+        /// been input to the FIFO or read from it since the last 4 character entries.
+        ///
+        /// Reset when reading from the receiver buffer register.
+        const TIMEOUT           = 0b110 << 1;
+
+        /// Indicates the transmitter holding register is empty.
+        ///
+        /// Reset by writing to the transmitter holding register or reading the interrupt identification register.
+        const TX_EMPTY          = 0b001 << 1;
+
+        /// CTS, DSR, RI, or DCD.
+        ///
+        /// Reset by reading the modem status register.
+        const MODEM_STATUS      = 0b000 << 1;
+
+        // Bits 4 & 5 are 0
+        // Bits 6 & 7 are 1
+    }
 }
 
 /// Serial port speed, measured in bauds.
@@ -104,57 +108,120 @@ pub enum Baud {
     B50 = 2304,
 }
 
-#[repr(C, packed)]
-pub struct LineControl {
-    pub bits: DataBits,
-    pub parity: ParityMode,
-    pub extra_stop: bool,
-    pub break_signal: bool,
-}
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FifoControl: u8 {
+        /// Enables the FIFO queue operation.
+        const ENABLE     = 1 << 0;
 
-impl LineControl {
-    #[inline]
-    pub const fn empty() -> Self {
-        Self {
-            bits: DataBits::Five,
-            parity: ParityMode::None,
-            extra_stop: false,
-            break_signal: false,
-        }
-    }
+        /// Clears the receiving queue of data.
+        const CLEAR_RX   = 1 << 1;
 
-    #[inline]
-    pub fn as_u8(self) -> u8 {
-        *0.set_bits(0..2, self.bits as u8)
-            .set_bit(2, self.extra_stop)
-            .set_bits(3..6, self.parity as u8)
-            .set_bit(6, self.break_signal)
+        /// Clears the transmitting queue of data.
+        const CLEAR_TX   = 1 << 2;
+
+        /// The FIFO queue will trigger an interrupt when it contains 1 byte.
+        const INT_LVL_1  = 0b00 << 5;
+
+        /// The FIFO queue will trigger an interrupt when it contains 4 bytes.
+        const INT_LVL_4  = 0b01 << 5;
+
+        /// The FIFO queue will trigger an interrupt when it contains 8 bytes.
+        const INT_LVL_8  = 0b10 << 5;
+
+        /// The FIFO queue will trigger an interrupt when it contains 14 bytes.
+        const INT_LVL_14 = 0b11 << 5;
     }
 }
 
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ModemControl : u8 {
-        const TERMINAL_READY = 1 << 0;
-        const REQUEST_TO_SEND = 1 << 1;
+    pub struct LineControl: u8 {
+        /// Each character is composed of 5 bits.
+        const BITS_5        = 0b00;
+
+        /// Each character is composed of 6 bits.
+        const BITS_6        = 0b01;
+
+        /// Each character is composed of 7 bits.
+        const BITS_7        = 0b10;
+
+        /// Each character is composed of 8 bits.
+        const BITS_8        = 0b11;
+
+        /// Each character transmission is followed by an extra stop bit.
+        const EXTRA_STOP    = 1 << 2;
+
+        /// Enables parity checking on the receiving end of the port.
+        const PARITY_ENABLE = 1 << 3;
+
+        /// Enables using even-1s based parity; otherwise, odd-1s based parity.
+        const EVEN_PARITY   = 1 << 4;
+
+        /// If even parity is enabled, the parity bit is transmitted and checked as
+        /// logic ‘0’. If odd parity is enabled, then the parity bit is transmitted
+        /// and checked as ‘1’.
+        const STICK_PARITY  = 1 << 5;
+
+        /// Forces the serial output into a logic '0' break state (and triggers the
+        /// interrupt, if enabled).
+        const BREAK_SIGNAL  = 1 << 6;
+
+        /// Enables access to the divisor latch registers, which allow setting the baud rate.
+        const DLAB          = 1 << 7;
+    }
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ModemControl: u8 {
+        /// Signals the chip is ready to transmit and receive data.
+        const TERMINAL_READY     = 1 << 0;
+
+        /// Request the other end of the port to send more data.
+        const REQUEST_TO_SEND    = 1 << 1;
+
+        /// In loopback mode, connected Ring Indicator (RI) signal input.
         const AUXILIARY_OUTPUT_1 = 1 << 2;
+
+        /// In loopback mode, connected Data Carrier Detect (DCD) signal input.
         const AUXILIARY_OUTPUT_2 = 1 << 3;
-        const LOOPBACK_MODE = 1 << 4;
+
+        /// Enables loopback mode, in which transmitted bits are able to be read
+        // on the same port. This is useful for testing chip operation.
+        const LOOPBACK_MODE      = 1 << 4;
     }
 }
 
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct LineStatus : u8 {
-        const DATA_AVAILABLE = 1 << 0;
-        const OVERRUN_ERROR = 1 << 1;
-        const PARITY_ERROR = 1 << 2;
-        const FRAMING_ERROR = 1 << 3;
+    pub struct LineStatus: u8 {
+        /// Indicates that the FIFO buffer has data awaiting transmission.
+        const DATA_AVAILABLE  = 1 << 0;
+
+        /// Indicates the FIFO was full when another character was transmitted.
+        const OVERRUN_ERROR   = 1 << 1;
+
+        /// Indicates the character at the top of the FIFO has failed the parity check.
+        const PARITY_ERROR    = 1 << 2;
+
+        /// Indicates the received character at the FIFO did not have a valid stop bit.
+        const FRAMING_ERROR   = 1 << 3;
+
+        /// Indicates a break condition has been reached in the current character.
         const BREAK_INDICATOR = 1 << 4;
-        const TRANSMIT_EMPTY = 1 << 5;
-        const TRANSMIT_EMPTY_IDLE = 1 << 6;
+
+        /// Indicates the transmitter holding register is empty (or FIFO is being used).
+        const THR_EMPTY       = 1 << 5;
+
+        /// Indicates the transmitter holding register AND shift register are empty (there is no more data).
+        const THR_SHR_EMPTY   = 1 << 6;
+
+        /// Indicates at least one parity error, framing error, or break indicators have been received.
         const IMPENDING_ERROR = 1 << 7;
     }
 }
@@ -162,15 +229,31 @@ bitflags! {
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ModemStatus : u8 {
-        const CLEAR_TO_SEND_CHANGED = 1 << 0;
-        const DATA_SET_READY_CHANGED= 1 << 1;
+    pub struct ModemStatus: u8 {
+        /// Data Clear To Send (DCTS) indicator.
+        const CLEAR_TO_SEND_CHANGED        = 1 << 0;
+
+        /// Delta Data Set Ready (DDSR) indicator.
+        const DATA_SET_READY_CHANGED       = 1 << 1;
+
+        /// Trailing Edge of Ring Indicator (TERI) detector.
+        /// The RI line has changed from low to high state.
         const TRAILING_EDGE_RING_INDICATOR = 1 << 2;
-        const CARRIER_DETECT_CHANGE = 1 << 3;
-        const CLEAR_TO_SEND = 1 << 4;
-        const DATA_SET_READY = 1 << 5;
-        const RING_INDICATOR = 1 << 6;
-        const CARRIER_DETECT = 1 << 7;
+
+        /// Delta Data Carrier Detect (DDCD) indicator.
+        const CARRIER_DETECT_CHANGE        = 1 << 3;
+
+        /// Complement of the CTS input, or RTS in loopback mode.
+        const CLEAR_TO_SEND                = 1 << 4;
+
+        /// Complement of the DSR input, or DTR in loopback mode.
+        const DATA_SET_READY               = 1 << 5;
+
+        /// Complement of the RI input, or AUX1 in loopback mode.
+        const RING_INDICATOR               = 1 << 6;
+
+        /// Complement of the RI input, or AUX2 in loopback mode.
+        const CARRIER_DETECT               = 1 << 7;
     }
 }
 
@@ -182,22 +265,41 @@ pub enum UartAddress {
 #[repr(usize)]
 #[allow(dead_code)]
 enum ReadOffset {
-    Data0 = 0x0,
-    Data1 = 0x1,
-    InterruptIdent = 0x2,
-    LineControl = 0x3,
-    ModemControl = 0x4,
-    LineStatus = 0x5,
-    ModemStatus = 0x6,
+    /// Receiver Holding Register
+    RHR = 0x0,
+
+    /// Interrupt Enable Register
+    IER = 0x1,
+
+    /// Interrupt Identification Register
+    IIR = 0x2,
+
+    /// Line Control Register
+    LCR = 0x3,
+
+    /// Line Status Register
+    LSR = 0x5,
+
+    /// Modem Status Register
+    MSR = 0x6,
 }
 
 #[repr(usize)]
 enum WriteOffset {
-    Data0 = 0x0,
-    Data1 = 0x1,
-    FifoControl = 0x2,
-    LineControl = 0x3,
-    ModemControl = 0x4,
+    /// Transmitter Holding Register
+    THR = 0x0,
+
+    /// Interrupt enable Register
+    IER = 0x1,
+
+    /// Fifo Control Register
+    FCR = 0x2,
+
+    /// Line Control Register
+    LCR = 0x3,
+
+    /// Modem Control Register
+    MCR = 0x4,
 }
 
 pub trait Mode {}
@@ -209,9 +311,8 @@ impl Mode for Configure {}
 pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
 impl<M: Mode> Uart<M> {
-    #[inline]
     fn read(&self, offset: ReadOffset) -> u8 {
-        // Safety: Constructor for `Uart` requires a valid base address.
+        // Safety: Constructor requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
@@ -219,6 +320,7 @@ impl<M: Mode> Uart<M> {
 
                     #[cfg(target_arch = "x86_64")]
                     core::arch::asm!("in al, dx", out("al") value, in("dx") port + (offset as u16), options(nostack, nomem, preserves_flags));
+
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
 
@@ -230,14 +332,14 @@ impl<M: Mode> Uart<M> {
         }
     }
 
-    #[inline]
     fn write(&mut self, offset: WriteOffset, value: u8) {
-        // Safety: Constructor for `Uart` requires a valid base address.
+        // Safety: Constructor requires a valid base address.
         unsafe {
             match self.0 {
                 UartAddress::Io(port) => {
                     #[cfg(target_arch = "x86_64")]
                     core::arch::asm!("out dx, al", in("dx") port + (offset as u16), in("al") value, options(nostack, nomem, preserves_flags));
+
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
                 }
@@ -247,91 +349,49 @@ impl<M: Mode> Uart<M> {
         }
     }
 
-    // TODO safety
-    #[inline]
-    pub fn disable_fifo(&mut self) {
-        self.write(WriteOffset::FifoControl, 0x0);
+    pub fn write_fifo_control(&mut self, fifo_control: FifoControl) {
+        self.write(WriteOffset::FCR, fifo_control.bits());
     }
 
-    // TODO safety
-    #[inline]
-    pub fn enable_fifo(
-        &mut self,
-        clear_rx: bool,
-        clear_tx: bool,
-        dma_mode_1: bool,
-        size: FifoSize,
-        /* todo enable_64_byte_buffer */
-    ) {
-        let mut control_bits = 1u8;
-        control_bits.set_bit(1, clear_rx);
-        control_bits.set_bit(2, clear_tx);
-        control_bits.set_bit(3, dma_mode_1);
-        control_bits.set_bits(6..8, size as u8);
-
-        self.write(WriteOffset::FifoControl, control_bits);
-    }
-
-    #[inline]
     pub fn read_line_control(&self) -> LineControl {
-        let line_control_raw = self.read(ReadOffset::LineControl);
-        LineControl {
-            bits: match line_control_raw.get_bits(0..2) {
-                0b00 => DataBits::Five,
-                0b01 => DataBits::Six,
-                0b10 => DataBits::Seven,
-                0b11 => DataBits::Eight,
-                _ => unimplemented!(),
-            },
-            parity: match line_control_raw.get_bits(3..6) {
-                0b000 => ParityMode::None,
-                0b001 => ParityMode::Odd,
-                0b011 => ParityMode::Even,
-                0b101 | 0b111 => ParityMode::High,
-                _ => unimplemented!(),
-            },
-            extra_stop: line_control_raw.get_bit(2),
-            break_signal: line_control_raw.get_bit(6),
-        }
+        // Safety: `self.read(...)` returns a single byte, of which `LineControl` uses all bits (so no unknown bits are possible).
+        unsafe { LineControl::from_bits(self.read(ReadOffset::LCR)).unwrap_unchecked() }
     }
 
-    #[inline]
     pub fn write_line_control(&mut self, value: LineControl) {
-        self.write(WriteOffset::LineControl, value.as_u8());
+        self.write(WriteOffset::LCR, value.bits());
     }
 
-    #[inline]
-    pub fn read_modem_control(&self) -> ModemControl {
-        ModemControl::from_bits_truncate(self.read(ReadOffset::ModemControl))
+    pub fn write_modem_control(&mut self, value: ModemControl) {
+        self.write(WriteOffset::MCR, value.bits());
     }
 
-    #[inline]
-    pub fn write_model_control(&mut self, value: ModemControl) {
-        self.write(WriteOffset::ModemControl, value.bits());
-    }
-
-    #[inline]
     pub fn read_line_status(&self) -> LineStatus {
-        LineStatus::from_bits_truncate(self.read(ReadOffset::LineStatus))
+        LineStatus::from_bits_truncate(self.read(ReadOffset::LSR))
     }
 
-    #[inline]
     pub fn read_modem_status(&self) -> ModemStatus {
-        ModemStatus::from_bits_truncate(self.read(ReadOffset::ModemStatus))
+        ModemStatus::from_bits_truncate(self.read(ReadOffset::MSR))
     }
 }
 
 impl Uart<Configure> {
-    #[inline]
     fn read_divisor_latch(&self) -> u16 {
-        ((self.read(ReadOffset::Data1) as u16) << 8) | (self.read(ReadOffset::Data0) as u16)
+        // When DLAB is enabled, RHR and IER become the LSB and MSB of the
+        // divisor latch register, respectively.
+
+        let lsb = u16::from(self.read(ReadOffset::RHR));
+        let msb = u16::from(self.read(ReadOffset::IER));
+
+        (msb << 8) | lsb
     }
 
-    #[inline]
     fn write_divisor_latch(&mut self, value: u16) {
+        // When DLAB is enabled, THR and IER become the LSB and MSB of the
+        // divisor latch register, respectively.
         let value_le_bytes = value.to_le_bytes();
-        self.write(WriteOffset::Data0, value_le_bytes[0]);
-        self.write(WriteOffset::Data1, value_le_bytes[1]);
+        self.write(WriteOffset::THR, value_le_bytes[0]);
+        self.write(WriteOffset::IER, value_le_bytes[1]);
     }
 
     pub fn get_baud(&self) -> Baud {
@@ -354,9 +414,12 @@ impl Uart<Configure> {
         self.write_divisor_latch(baud as u16);
     }
 
-    pub fn data_mode(mut self) -> Uart<Data> {
-        // enable DLAB
-        self.write(WriteOffset::LineControl, self.read_line_control().as_u8());
+    /// Disables access to the divisor latch registers.
+    pub fn into_data_mode(mut self) -> Uart<Data> {
+        let mut line_control = self.read_line_control();
+        line_control.remove(LineControl::DLAB);
+
+        self.write(WriteOffset::LCR, line_control.bits());
 
         Uart::<Data>(self.0, PhantomData)
     }
@@ -371,129 +434,29 @@ impl Uart<Data> {
         Self(address, PhantomData)
     }
 
-    #[inline]
     pub fn read_data(&self) -> u8 {
-        self.read(ReadOffset::Data0)
+        self.read(ReadOffset::RHR)
     }
 
-    #[inline]
     pub fn write_data(&mut self, data: u8) {
-        self.write(WriteOffset::Data0, data);
+        self.write(WriteOffset::THR, data);
     }
 
-    #[inline]
     pub fn read_interrupt_enable(&self) -> InterruptEnable {
-        InterruptEnable::from_bits_truncate(self.read(ReadOffset::Data1))
+        InterruptEnable::from_bits_truncate(self.read(ReadOffset::IER))
     }
 
-    #[inline]
     pub fn write_interrupt_enable(&mut self, value: InterruptEnable) {
-        self.write(WriteOffset::Data1, value.bits());
+        self.write(WriteOffset::IER, value.bits());
     }
 
-    #[inline]
-    pub fn configure_mode(mut self) -> Uart<Configure> {
-        // enable DLAB
-        self.write(
-            WriteOffset::LineControl,
-            self.read_line_control().as_u8() | (1 << 7),
-        );
+    /// Enables access to the divisor latch registers.
+    pub fn into_configure_mode(mut self) -> Uart<Configure> {
+        let mut line_control = self.read_line_control();
+        line_control.insert(LineControl::DLAB);
+
+        self.write(WriteOffset::LCR, line_control.bits());
 
         Uart::<Configure>(self.0, PhantomData)
-    }
-}
-
-pub const UART_FIFO_QUEUE_LEN: usize = 14;
-
-pub struct UartWriter {
-    uart: Uart<Data>,
-    queue_accumulator: usize,
-}
-
-impl UartWriter {
-    pub fn new(mut uart: Uart<Data>) -> Option<Self> {
-        // Bring UART to a known state.
-        uart.write_line_control(LineControl::empty());
-        uart.write_interrupt_enable(InterruptEnable::empty());
-
-        // Configure the baud rate (tx/rx speed).
-        let mut uart = uart.configure_mode();
-        uart.set_baud(Baud::B115200);
-        let mut uart = uart.data_mode();
-
-        // Configure total UART state.
-        uart.write_line_control(LineControl {
-            bits: DataBits::Eight,
-            parity: ParityMode::None,
-            extra_stop: false,
-            break_signal: false,
-        });
-        uart.enable_fifo(true, true, false, FifoSize::Fourteen);
-
-        // Test the UART to ensure it's functioning correctly.
-        uart.write_model_control(
-            ModemControl::REQUEST_TO_SEND
-                | ModemControl::AUXILIARY_OUTPUT_1
-                | ModemControl::AUXILIARY_OUTPUT_2
-                | ModemControl::LOOPBACK_MODE,
-        );
-
-        const TEST_VALUE: u8 = 0x1F;
-        uart.write_data(TEST_VALUE);
-        if uart.read_data().ne(&TEST_VALUE) {
-            return None;
-        }
-
-        // Configure modem control for actual UART usage.
-        uart.write_model_control(
-            ModemControl::TERMINAL_READY
-                | ModemControl::REQUEST_TO_SEND
-                | ModemControl::AUXILIARY_OUTPUT_1
-                | ModemControl::AUXILIARY_OUTPUT_2,
-        );
-
-        Some(Self {
-            uart,
-            queue_accumulator: 0,
-        })
-    }
-
-    fn queue_index(&self) -> usize {
-        self.queue_accumulator % UART_FIFO_QUEUE_LEN
-    }
-
-    fn write_byte(&mut self, byte: u8) {
-        if self.queue_index() == UART_FIFO_QUEUE_LEN {
-            while !self
-                .uart
-                .read_line_status()
-                .contains(LineStatus::TRANSMIT_EMPTY_IDLE)
-            {
-                core::hint::spin_loop();
-            }
-        } else {
-            while !self
-                .uart
-                .read_line_status()
-                .contains(LineStatus::TRANSMIT_EMPTY)
-            {
-                core::hint::spin_loop();
-            }
-        }
-
-        self.uart.write_data(byte);
-        self.queue_accumulator += 1;
-    }
-}
-
-impl core::fmt::Write for UartWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        s.chars().try_for_each(|c| self.write_char(c))
-    }
-
-    fn write_char(&mut self, c: char) -> core::fmt::Result {
-        self.write_byte(u8::try_from(c).unwrap_or(b'?'));
-
-        Ok(())
     }
 }
