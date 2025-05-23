@@ -1,4 +1,6 @@
-use crate::{Baud, Data, InterruptEnable, LineControl, LineStatus, ModemControl, Uart};
+use crate::{
+    Baud, Data, InterruptEnable, LineControl, LineStatus, ModemControl, Uart, UartAddress,
+};
 
 /// Convenience type for interacting unidirectionally (write-only) with a 16550 UART device.
 ///
@@ -11,7 +13,10 @@ impl UartWriter {
     ///
     /// - `address` must be a valid serial address pointing to a UART 16550 device.
     /// - `address` must not be read from or written to by another context.
-    pub unsafe fn new(mut uart: Uart<Data>) -> Option<Self> {
+    pub unsafe fn new(address: UartAddress) -> Option<Self> {
+        // Safety: Function invariants provide safety guarantees.
+        let mut uart = unsafe { Uart::<Data>::new(address) };
+
         // Bring UART to a known state.
         uart.write_line_control(LineControl::empty());
         uart.write_interrupt_enable(InterruptEnable::empty());
