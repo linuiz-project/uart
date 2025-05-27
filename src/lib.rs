@@ -57,7 +57,7 @@ bitflags! {
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct InterruptIdent: u8 {
+    pub struct InterruptStatus: u8 {
         /// Indicates an interrupt is pending.
         const INTERRUPT_PENDING = 1 << 0;
 
@@ -187,12 +187,13 @@ bitflags! {
         /// In loopback mode, connected Ring Indicator (RI) signal input.
         const OUT_1           = 1 << 2;
 
-        /// Enables or disables interrupts when not in loopback mode (bit 4)
+        /// Enables or disables interrupts when not in loopback mode (bit 4).
+        ///
         /// In loopback mode, connected Data Carrier Detect (DCD) signal input.
         const OUT_2           = 1 << 3;
 
         /// Enables loopback mode, in which transmitted bits are able to be read
-        // on the same port. This is useful for testing chip operation.
+        /// on the same port. This is useful for testing chip operation.
         const LOOPBACK_MODE   = 1 << 4;
     }
 }
@@ -272,8 +273,8 @@ enum ReadOffset {
     /// Interrupt Enable Register
     IER = 0x1,
 
-    /// Interrupt Identification Register
-    IIR = 0x2,
+    /// Interrupt Status Register
+    ISR = 0x2,
 
     /// Line Control Register
     LCR = 0x3,
@@ -303,15 +304,15 @@ enum WriteOffset {
     MCR = 0x4,
 }
 
-pub trait DlabMode {}
+pub trait Mode {}
 pub struct Data;
-impl DlabMode for Data {}
+impl Mode for Data {}
 pub struct Configure;
-impl DlabMode for Configure {}
+impl Mode for Configure {}
 
-pub struct Uart<M: DlabMode>(UartAddress, PhantomData<M>);
+pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
 
-impl<M: DlabMode> Uart<M> {
+impl<M: Mode> Uart<M> {
     fn read(&self, offset: ReadOffset) -> u8 {
         // Safety: Constructor requires a valid base address.
         unsafe {
@@ -320,7 +321,12 @@ impl<M: DlabMode> Uart<M> {
                     let value: u8;
 
                     #[cfg(target_arch = "x86_64")]
-                    core::arch::asm!("in al, dx", out("al") value, in("dx") port + (offset as u16), options(nostack, nomem, preserves_flags));
+                    core::arch::asm!(
+                        "in al, dx",
+                        out("al") value,
+                        in("dx") port + (offset as u16),
+                        options(nostack, nomem, preserves_flags)
+                    );
 
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
@@ -339,7 +345,12 @@ impl<M: DlabMode> Uart<M> {
             match self.0 {
                 UartAddress::Io(port) => {
                     #[cfg(target_arch = "x86_64")]
-                    core::arch::asm!("out dx, al", in("dx") port + (offset as u16), in("al") value, options(nostack, nomem, preserves_flags));
+                    core::arch::asm!(
+                        "out dx, al",
+                        in("dx") port + (offset as u16),
+                        in("al") value,
+                        options(nostack, nomem, preserves_flags)
+                    );
 
                     #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
@@ -350,33 +361,45 @@ impl<M: DlabMode> Uart<M> {
         }
     }
 
+    /// Read from the interrupt status register.
+    pub fn read_interrupt_status(&self) -> InterruptStatus {
+        InterruptStatus::from_bits_retain(self.read(ReadOffset::ISR))
+    }
+
+    /// Write to the FIFO control register.
     pub fn write_fifo_control(&mut self, fifo_control: FifoControl) {
         self.write(WriteOffset::FCR, fifo_control.bits());
     }
 
+    /// Read from the line control register.
     pub fn read_line_control(&self) -> LineControl {
         // Safety: `self.read(...)` returns a single byte, of which `LineControl` uses all bits (so no unknown bits are possible).
         unsafe { LineControl::from_bits(self.read(ReadOffset::LCR)).unwrap_unchecked() }
     }
 
+    /// Write to the line control register.
     pub fn write_line_control(&mut self, value: LineControl) {
         self.write(WriteOffset::LCR, value.bits());
     }
 
+    /// Write to the modem control register.
     pub fn write_modem_control(&mut self, value: ModemControl) {
         self.write(WriteOffset::MCR, value.bits());
     }
 
+    /// Read from the line status register.
     pub fn read_line_status(&self) -> LineStatus {
         LineStatus::from_bits_truncate(self.read(ReadOffset::LSR))
     }
 
+    /// Read from the modem status register.
     pub fn read_modem_status(&self) -> ModemStatus {
         ModemStatus::from_bits_truncate(self.read(ReadOffset::MSR))
     }
 }
 
 impl Uart<Configure> {
+    /// Read from the divisor latch from the 1st & 2nd registers.
     fn read_divisor_latch(&self) -> u16 {
         // When DLAB is enabled, RHR and IER become the LSB and MSB of the
         // divisor latch register, respectively.
@@ -387,14 +410,18 @@ impl Uart<Configure> {
         (msb << 8) | lsb
     }
 
+    /// Write the divisor latch to the 1st & 2nd registers.
     fn write_divisor_latch(&mut self, value: u16) {
         // When DLAB is enabled, THR and IER become the LSB and MSB of the
         // divisor latch register, respectively.
+
         let value_le_bytes = value.to_le_bytes();
+
         self.write(WriteOffset::THR, value_le_bytes[0]);
         self.write(WriteOffset::IER, value_le_bytes[1]);
     }
 
+    /// Read from the baud rate from the divisor latch registers.
     pub fn get_baud(&self) -> Baud {
         match self.read_divisor_latch() {
             1 => Baud::B115200,
@@ -411,6 +438,7 @@ impl Uart<Configure> {
         }
     }
 
+    /// Set the baud rate using the divisor latch registers.
     pub fn set_baud(&mut self, baud: Baud) {
         self.write_divisor_latch(baud as u16);
     }
@@ -435,18 +463,22 @@ impl Uart<Data> {
         Self(address, PhantomData)
     }
 
+    /// Reads a byte from the 1st register (RHR).
     pub fn read_byte(&self) -> u8 {
         self.read(ReadOffset::RHR)
     }
 
+    /// Writes a byte to the 2nd register (THR).
     pub fn write_byte(&mut self, byte: u8) {
         self.write(WriteOffset::THR, byte);
     }
 
+    /// Reads from the interrupt enable register.
     pub fn read_interrupt_enable(&self) -> InterruptEnable {
         InterruptEnable::from_bits_truncate(self.read(ReadOffset::IER))
     }
 
+    /// Writes to the interrupt enable register.
     pub fn write_interrupt_enable(&mut self, value: InterruptEnable) {
         self.write(WriteOffset::IER, value.bits());
     }
