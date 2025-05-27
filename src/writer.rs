@@ -32,8 +32,8 @@ impl UartWriter {
         // Test the UART to ensure it's functioning correctly.
         uart.write_modem_control(
             ModemControl::REQUEST_TO_SEND
-                | ModemControl::AUXILIARY_OUTPUT_1
-                | ModemControl::AUXILIARY_OUTPUT_2
+                | ModemControl::OUT_1
+                | ModemControl::OUT_2
                 | ModemControl::LOOPBACK_MODE,
         );
 
@@ -44,10 +44,7 @@ impl UartWriter {
 
         // Configure modem control for actual UART usage.
         uart.write_modem_control(
-            ModemControl::TERMINAL_READY
-                | ModemControl::REQUEST_TO_SEND
-                | ModemControl::AUXILIARY_OUTPUT_1
-                | ModemControl::AUXILIARY_OUTPUT_2,
+            ModemControl::TERMINAL_READY | ModemControl::REQUEST_TO_SEND | ModemControl::OUT_1,
         );
 
         Some(Self(uart))

@@ -179,20 +179,21 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ModemControl: u8 {
         /// Signals the chip is ready to transmit and receive data.
-        const TERMINAL_READY     = 1 << 0;
+        const TERMINAL_READY  = 1 << 0;
 
-        /// Request the other end of the port to send more data.
-        const REQUEST_TO_SEND    = 1 << 1;
+        /// Signal the chip is ready to receive data from the port.
+        const REQUEST_TO_SEND = 1 << 1;
 
         /// In loopback mode, connected Ring Indicator (RI) signal input.
-        const AUXILIARY_OUTPUT_1 = 1 << 2;
+        const OUT_1           = 1 << 2;
 
+        /// Enables or disables interrupts when not in loopback mode (bit 4)
         /// In loopback mode, connected Data Carrier Detect (DCD) signal input.
-        const AUXILIARY_OUTPUT_2 = 1 << 3;
+        const OUT_2           = 1 << 3;
 
         /// Enables loopback mode, in which transmitted bits are able to be read
         // on the same port. This is useful for testing chip operation.
-        const LOOPBACK_MODE      = 1 << 4;
+        const LOOPBACK_MODE   = 1 << 4;
     }
 }
 
@@ -302,15 +303,15 @@ enum WriteOffset {
     MCR = 0x4,
 }
 
-pub trait Mode {}
+pub trait DlabMode {}
 pub struct Data;
-impl Mode for Data {}
+impl DlabMode for Data {}
 pub struct Configure;
-impl Mode for Configure {}
+impl DlabMode for Configure {}
 
-pub struct Uart<M: Mode>(UartAddress, PhantomData<M>);
+pub struct Uart<M: DlabMode>(UartAddress, PhantomData<M>);
 
-impl<M: Mode> Uart<M> {
+impl<M: DlabMode> Uart<M> {
     fn read(&self, offset: ReadOffset) -> u8 {
         // Safety: Constructor requires a valid base address.
         unsafe {
