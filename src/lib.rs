@@ -434,12 +434,12 @@ impl Uart<Data> {
         Self(address, PhantomData)
     }
 
-    pub fn read_data(&self) -> u8 {
+    pub fn read_byte(&self) -> u8 {
         self.read(ReadOffset::RHR)
     }
 
-    pub fn write_data(&mut self, data: u8) {
-        self.write(WriteOffset::THR, data);
+    pub fn write_byte(&mut self, byte: u8) {
+        self.write(WriteOffset::THR, byte);
     }
 
     pub fn read_interrupt_enable(&self) -> InterruptEnable {

@@ -37,8 +37,8 @@ impl UartWriter {
                 | ModemControl::LOOPBACK_MODE,
         );
 
-        uart.write_data(0x1F);
-        if uart.read_data() != 0x1F {
+        uart.write_byte(0x1F);
+        if uart.read_byte() != 0x1F {
             return None;
         }
 
@@ -67,7 +67,7 @@ impl core::fmt::Write for UartWriter {
         while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
             core::hint::spin_loop();
         }
-        self.0.write_data(u8::try_from(c).unwrap_or(b'?'));
+        self.0.write_byte(u8::try_from(c).unwrap_or(b'?'));
 
         Ok(())
     }
