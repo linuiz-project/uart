@@ -263,6 +263,10 @@ pub struct UartMmioAddress {
     pub base_pointer: *mut u8,
     pub stride_bytes: usize,
 }
+// Safety: dropping this in another thread will not cause problems
+unsafe impl Send for UartMmioAddress {}
+// Safety: reading and writing to the memory from another thread will not cause problems
+unsafe impl Sync for UartMmioAddress {}
 
 pub enum UartAddress {
     Io(u16),
