@@ -1,6 +1,6 @@
 [package]
 name = "uart"
-version = "1.4.1"
+version = "2.0.0"
 edition = "2024"
 license = "BSD-3-Clause"
 repository = "https://github.com/linuiz-project/uart"
@@ -12,5 +12,6 @@ description = "A clean implementation of the UART_16550 device functionality."
 bitflags = "2.9.1"
 
 [features]
-default = ["writer"]
-writer = []
+default = ["address_impl", "writer_impl"]
+address_impl = []
+writer_impl = []
