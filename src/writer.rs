@@ -3,16 +3,17 @@ use crate::{
     UartAddress,
 };
 
-/// Convenience type for interacting unidirectionally (write-only) with a 16550 UART device.
-///
-/// It should be noted that this implementation is meant to be a refernece or testing
-/// implementation, as it is extremely slow, uses blocking IO, and does not utilize the FIFO.
+/// Convenience type for interacting unidirectionally (write-only) with a 16550
+/// UART device. It should be noted that this implementation is meant to be a
+/// refernece or testing implementation, as it is extremely slow, uses blocking
+/// IO, and does not utilize the FIFO.
 pub struct UartWriter<A: UartAddress>(Uart<A, Data>);
 
 impl<A: UartAddress> UartWriter<A> {
     /// ### Safety
     ///
-    /// - `address` must be a valid serial address pointing to a UART 16550 device.
+    /// - `address` must be a valid serial address pointing to a UART 16550
+    ///   device.
     /// - `address` must not be read from or written to by another context.
     pub unsafe fn new(address: A, loopback_test: bool) -> Option<Self> {
         // Safety: Function invariants provide safety guarantees.
@@ -62,11 +63,7 @@ impl<A: UartAddress> UartWriter<A> {
 
 impl<A: UartAddress> core::fmt::Write for UartWriter<A> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for c in s.chars() {
-            self.write_char(c)?;
-        }
-
-        Ok(())
+        s.chars().try_for_each(|c| self.write_char(c))
     }
 
     fn write_char(&mut self, c: char) -> core::fmt::Result {
@@ -74,7 +71,11 @@ impl<A: UartAddress> core::fmt::Write for UartWriter<A> {
             core::hint::spin_loop();
         }
 
-        self.0.write_byte(u8::try_from(c).unwrap_or(b'?'));
+        self.0.write_byte({
+            // We can practically only write ASCII to a UART, so replace
+            // any char that isn't with a question mark.
+            if c.is_ascii() { c as u8 } else { b'?' }
+        });
 
         Ok(())
     }
