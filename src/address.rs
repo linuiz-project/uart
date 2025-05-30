@@ -31,6 +31,7 @@ pub struct MmioAddress {
     base: *mut u8,
     stride: usize,
 }
+
 impl MmioAddress {
     /// Creates a new [`MmioAddress`] with `base` as the base memory address.
     ///

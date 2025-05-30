@@ -17,6 +17,7 @@ use bitflags::bitflags;
 use core::marker::PhantomData;
 
 bitflags! {
+    /// Represents the possible states of the interrupt enable register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct InterruptEnable: u8 {
@@ -37,6 +38,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// Represents the possible states of the interrupt status register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct InterruptStatus: u8 {
@@ -91,6 +93,7 @@ pub enum Baud {
 }
 
 bitflags! {
+    /// Represents the possible states of the FIFO control register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct FifoControl: u8 {
@@ -118,6 +121,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// Represents the possible states of the line control register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LineControl: u8 {
@@ -157,6 +161,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// Represents the possible states of the modem control register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ModemControl: u8 {
@@ -181,6 +186,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// Represents the possible states of the line status register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LineStatus: u8 {
@@ -211,6 +217,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// Represents the possible states of the modem status register.
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ModemStatus: u8 {
@@ -241,11 +248,22 @@ bitflags! {
     }
 }
 
+
+/// Represents the address of a UART register.
+///
+/// ## Remarks
+///
+/// It would be invalid for this to constructed with an incorrect / improper address.
+/// Given this, to my mind it should be unsafe to construct this value, as it *should*
+/// represent only valid UART register addresses. However, there isn't an idiomatic way
+/// to force `enum` construction to be unsafe—thus, it is up to the implementor to ensure
+/// this is not constructed with an invalid address.
 pub enum RegisterAddress {
     Port(u16),
     Mmio(*mut u8),
 }
 
+/// The read-enabled UART registers and their order.
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 pub enum ReadableRegister {
@@ -257,6 +275,7 @@ pub enum ReadableRegister {
     ModemStatus = 0x6,
 }
 
+/// The write-enabled UART registers and their order.
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 pub enum WriteableRegister {
