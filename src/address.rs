@@ -27,16 +27,19 @@ unsafe impl UartAddress for PortAddress {
 }
 
 /// An MMIO-based UART address.
-pub struct MmioAddress(*mut u8);
-
+pub struct MmioAddress {
+    base: *mut u8,
+    stride: usize,
+}
 impl MmioAddress {
     /// Creates a new [`MmioAddress`] with `base` as the base memory address.
     ///
     /// ## Safety
     ///
-    /// - Base address must be an MMIO-based UART device.
-    pub const unsafe fn new(base: *mut u8) -> Self {
-        Self(base)
+    /// - `base` must be a pointer to an MMIO-based UART device.
+    /// - `stride` must be the uniform distance (in bytes) between each UART register.
+    pub const unsafe fn new(base: *mut u8, stride: usize) -> Self {
+        Self { base, stride }
     }
 }
 
@@ -45,15 +48,19 @@ impl MmioAddress {
 unsafe impl UartAddress for MmioAddress {
     fn get_read_address(&self, register: ReadableRegister) -> RegisterAddress {
         RegisterAddress::Mmio({
-            // Safety: `self.0` is required to be a valid base address, and `register` is a valid register offset.
-            unsafe { self.0.add(register as usize) }
+            // Safety: `self.base` is required to be a valid base address, `register` is a
+            //         valid offset, and `self.stride` is required to be the distance (in bytes)
+            //         between each UART register.
+            unsafe { self.base.add((register as usize) * self.stride) }
         })
     }
 
     fn get_write_address(&self, register: WriteableRegister) -> RegisterAddress {
         RegisterAddress::Mmio({
-            // Safety: `self.0` is required to be a valid base address, and `register` is a valid register offset.
-            unsafe { self.0.add(register as usize) }
+            // Safety: `self.base` is required to be a valid base address, `register` is a
+            //         valid offset, and `self.stride` is required to be the distance (in bytes)
+            //         between each UART register.
+            unsafe { self.base.add((register as usize) * self.stride) }
         })
     }
 }
