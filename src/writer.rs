@@ -10,12 +10,18 @@ use crate::{
 pub struct UartWriter<A: UartAddress>(Uart<A, Data>);
 
 impl<A: UartAddress> UartWriter<A> {
-    /// ### Safety
+    /// Constructs a new [`UartWriter`].
+    ///
+    /// # Safety
     ///
     /// - `address` must be a valid serial address pointing to a UART 16550
     ///   device.
     /// - `address` must not be read from or written to by another context.
-    pub unsafe fn new(address: A, loopback_test: bool) -> Option<Self> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if `loopback_test` is `true`, and the loopback test fails.
+    pub unsafe fn new(address: A, loopback_test: bool) -> Self {
         // Safety: Function invariants provide safety guarantees.
         let mut uart = unsafe { Uart::<A, Data>::new(address) };
 
@@ -47,9 +53,7 @@ impl<A: UartAddress> UartWriter<A> {
             // A) doesn't support loopback mode, or
             // B) is malfunctioning and/or faulty
             uart.write_byte(0x1F);
-            if uart.read_byte() != 0x1F {
-                return None;
-            }
+            assert!(uart.read_byte() == 0x1F, "loopback test failed");
         }
 
         // Configure modem control for actual UART usage.
@@ -57,7 +61,7 @@ impl<A: UartAddress> UartWriter<A> {
             ModemControl::TERMINAL_READY | ModemControl::REQUEST_TO_SEND | ModemControl::OUT_1,
         );
 
-        Some(Self(uart))
+        Self(uart)
     }
 }
 
