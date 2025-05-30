@@ -259,9 +259,14 @@ bitflags! {
     }
 }
 
+pub struct UartMmioAddress {
+    pub base_pointer: *mut u8,
+    pub stride_bytes: usize,
+}
+
 pub enum UartAddress {
     Io(u16),
-    Mmio(*mut u8),
+    Mmio(UartMmioAddress),
 }
 
 #[repr(usize)]
@@ -334,7 +339,12 @@ impl<M: Mode> Uart<M> {
                     value
                 }
 
-                UartAddress::Mmio(ptr) => ptr.add(offset as usize).read_volatile(),
+                UartAddress::Mmio(UartMmioAddress {
+                    base_pointer,
+                    stride_bytes,
+                }) => base_pointer
+                    .add(offset as usize * stride_bytes)
+                    .read_volatile(),
             }
         }
     }
@@ -356,7 +366,12 @@ impl<M: Mode> Uart<M> {
                     unimplemented!();
                 }
 
-                UartAddress::Mmio(ptr) => ptr.add(offset as usize).write_volatile(value),
+                UartAddress::Mmio(UartMmioAddress {
+                    base_pointer,
+                    stride_bytes,
+                }) => base_pointer
+                    .add(offset as usize * stride_bytes)
+                    .write_volatile(value),
             }
         }
     }
