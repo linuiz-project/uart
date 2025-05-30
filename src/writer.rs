@@ -14,7 +14,7 @@ impl<A: UartAddress> UartWriter<A> {
     ///
     /// - `address` must be a valid serial address pointing to a UART 16550 device.
     /// - `address` must not be read from or written to by another context.
-    pub unsafe fn new(address: A) -> Option<Self> {
+    pub unsafe fn new(address: A, loopback_test: bool) -> Option<Self> {
         // Safety: Function invariants provide safety guarantees.
         let mut uart = unsafe { Uart::<A, Data>::new(address) };
 
@@ -31,17 +31,24 @@ impl<A: UartAddress> UartWriter<A> {
         // Set character size to 8 bits with no parity.
         uart.write_line_control(LineControl::BITS_8);
 
-        // Test the UART to ensure it's functioning correctly.
-        uart.write_modem_control(
-            ModemControl::REQUEST_TO_SEND
-                | ModemControl::OUT_1
-                | ModemControl::OUT_2
-                | ModemControl::LOOPBACK_MODE,
-        );
+        if loopback_test {
+            // Test the UART to ensure it's functioning correctly.
+            uart.write_modem_control(
+                ModemControl::REQUEST_TO_SEND
+                    | ModemControl::OUT_1
+                    | ModemControl::OUT_2
+                    | ModemControl::LOOPBACK_MODE,
+            );
 
-        uart.write_byte(0x1F);
-        if uart.read_byte() != 0x1F {
-            return None;
+            // Here, we write a byte to the output, which in loopback mode
+            // *should* insert that same byte into the receiver register
+            // to be read. If this fails, the UART either:
+            // A) doesn't support loopback mode, or
+            // B) is malfunctioning and/or faulty
+            uart.write_byte(0x1F);
+            if uart.read_byte() != 0x1F {
+                return None;
+            }
         }
 
         // Configure modem control for actual UART usage.
