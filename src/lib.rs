@@ -14,7 +14,8 @@ pub mod address;
 pub mod writer;
 
 use bitflags::bitflags;
-use core::marker::PhantomData;
+use safe_mmio::UniqueMmioPointer;
+use core::{marker::PhantomData, num::NonZero, ptr::NonNull};
 
 bitflags! {
     /// Represents the possible states of the interrupt enable register.
@@ -259,8 +260,8 @@ bitflags! {
 /// to force `enum` construction to be unsafe—thus, it is up to the implementor to ensure
 /// this is not constructed with an invalid address.
 pub enum RegisterAddress {
-    Port(u16),
-    Mmio(*mut u8),
+    Port(NonZero<u16>),
+    Mmio(NonNull<u8>),
 }
 
 /// The read-enabled UART registers and their order.
@@ -323,7 +324,7 @@ impl<A: UartAddress, M: Mode> Uart<A, M> {
                     core::arch::asm!(
                         "in al, dx",
                         out("al") value,
-                        in("dx") port_address,
+                        in("dx") port_address.get(),
                         options(nostack, nomem, preserves_flags)
                     );
                 }
@@ -334,9 +335,11 @@ impl<A: UartAddress, M: Mode> Uart<A, M> {
                 value
             }
 
-            RegisterAddress::Mmio(mmio_address) => {
+            RegisterAddress::Mmio(mmio_ptr) => {
+                let ptr = unsafe{ UniqueMmioPointer::new(mmio_ptr) };
+ptr
                 // Safety: `UartAddress::get_read_address` must ensure `mmio_address` is valid for reading as UART register.
-                unsafe { mmio_address.read_volatile() }
+                unsafe { mmio_ptr.read_volatile() }
             }
         }
     }
