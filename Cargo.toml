@@ -10,7 +10,6 @@ description = "A clean implementation of the UART_16550 device functionality."
 
 [dependencies]
 bitflags = "2.9.1"
-safe-mmio = "0.2.5"
 
 [features]
 default = ["address_impl", "writer_impl"]
