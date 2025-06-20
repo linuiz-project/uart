@@ -8,7 +8,7 @@ pub struct PortAddress(NonZero<u16>);
 impl PortAddress {
     /// Creates a new [`PortAddress`] with `base` as the base port address.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// - Base address must be a port-based UART device.
     pub const unsafe fn new(base: NonZero<u16>) -> Self {
@@ -23,6 +23,7 @@ unsafe impl UartAddress for PortAddress {
         let port_address = self.0.checked_add(register as u16).unwrap();
         let value: u8;
 
+        // Safety: Caller is required to ensure that reading from port `port_address` is valid.
         #[cfg(target_arch = "x86_64")]
         unsafe {
             core::arch::asm!(
@@ -42,6 +43,7 @@ unsafe impl UartAddress for PortAddress {
     unsafe fn write(&self, register: WriteableRegister, value: u8) {
         let port_address = self.0.checked_add(register as u16).unwrap();
 
+        // Safety: Caller is required to ensure that writing `value` to port `port_address` is valid.
         #[cfg(target_arch = "x86_64")]
         unsafe {
             core::arch::asm!(
@@ -66,7 +68,7 @@ pub struct MmioAddress {
 impl MmioAddress {
     /// Creates a new [`MmioAddress`] with `base` as the base memory address.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// - `base` must be a pointer to an MMIO-based UART device.
     /// - `stride` must be the uniform distance (in bytes) between each UART register.
