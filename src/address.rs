@@ -20,7 +20,7 @@ impl PortAddress {
 //         impls are correctly offset from that.
 unsafe impl UartAddress for PortAddress {
     unsafe fn read(&self, register: ReadableRegister) -> u8 {
-        let port_address = self.0.checked_add(register as u16).unwrap();
+        let port_address = self.0.checked_add(register.as_index()).unwrap();
         let value: u8;
 
         // Safety: Caller is required to ensure that reading from port `port_address` is valid.
@@ -41,7 +41,7 @@ unsafe impl UartAddress for PortAddress {
     }
 
     unsafe fn write(&self, register: WriteableRegister, value: u8) {
-        let port_address = self.0.checked_add(register as u16).unwrap();
+        let port_address = self.0.checked_add(register.as_index()).unwrap();
 
         // Safety: Caller is required to ensure that writing `value` to port `port_address` is valid.
         #[cfg(target_arch = "x86_64")]
@@ -87,7 +87,7 @@ unsafe impl UartAddress for MmioAddress {
         //         - Writing `value` is required to not cause undefined behaviour.
         unsafe {
             self.base
-                .byte_add((register as usize) * self.stride)
+                .byte_add(usize::from(register.as_index()) * self.stride)
                 .write_volatile(value);
         }
     }
@@ -99,7 +99,7 @@ unsafe impl UartAddress for MmioAddress {
         //         - Reading `value` is required to not cause undefined behaviour.
         unsafe {
             self.base
-                .byte_add((register as usize) * self.stride)
+                .byte_add(usize::from(register.as_index()) * self.stride)
                 .read_volatile()
         }
     }
