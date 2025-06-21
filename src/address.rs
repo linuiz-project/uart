@@ -1,15 +1,17 @@
-use crate::{ReadableRegister, RegisterAddress, UartAddress, WriteableRegister};
+use core::{num::NonZero, ptr::NonNull};
+
+use crate::{ReadableRegister, UartAddress, WriteableRegister};
 
 /// A port-based UART address.
-pub struct PortAddress(u16);
+pub struct PortAddress(NonZero<u16>);
 
 impl PortAddress {
     /// Creates a new [`PortAddress`] with `base` as the base port address.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// - Base address must be a port-based UART device.
-    pub const unsafe fn new(base: u16) -> Self {
+    pub const unsafe fn new(base: NonZero<u16>) -> Self {
         Self(base)
     }
 }
@@ -17,29 +19,60 @@ impl PortAddress {
 // Safety: Constructor requires that the base address be valid, and register
 //         impls are correctly offset from that.
 unsafe impl UartAddress for PortAddress {
-    fn get_read_address(&self, register: ReadableRegister) -> RegisterAddress {
-        RegisterAddress::Port(self.0 + (register as u16))
+    unsafe fn read(&self, register: ReadableRegister) -> u8 {
+        let port_address = self.0.checked_add(register as u16).unwrap();
+        let value: u8;
+
+        // Safety: Caller is required to ensure that reading from port `port_address` is valid.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!(
+                "in al, dx",
+                out("al") value,
+                in("dx") port_address.get(),
+                options(nostack, nomem, preserves_flags)
+            );
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
+        unimplemented!();
+
+        value
     }
 
-    fn get_write_address(&self, register: WriteableRegister) -> RegisterAddress {
-        RegisterAddress::Port(self.0 + (register as u16))
+    unsafe fn write(&self, register: WriteableRegister, value: u8) {
+        let port_address = self.0.checked_add(register as u16).unwrap();
+
+        // Safety: Caller is required to ensure that writing `value` to port `port_address` is valid.
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!(
+                "out dx, al",
+                in("dx") port_address.get(),
+                in("al") value,
+                options(nostack, nomem, preserves_flags)
+            );
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
+        unimplemented!();
     }
 }
 
 /// An MMIO-based UART address.
 pub struct MmioAddress {
-    base: *mut u8,
+    base: NonNull<u8>,
     stride: usize,
 }
 
 impl MmioAddress {
     /// Creates a new [`MmioAddress`] with `base` as the base memory address.
     ///
-    /// ## Safety
+    /// # Safety
     ///
     /// - `base` must be a pointer to an MMIO-based UART device.
     /// - `stride` must be the uniform distance (in bytes) between each UART register.
-    pub const unsafe fn new(base: *mut u8, stride: usize) -> Self {
+    pub const unsafe fn new(base: NonNull<u8>, stride: usize) -> Self {
         Self { base, stride }
     }
 }
@@ -47,21 +80,27 @@ impl MmioAddress {
 // Safety: Constructor requires that the base address be valid, and register
 //         impls are correctly offset from that.
 unsafe impl UartAddress for MmioAddress {
-    fn get_read_address(&self, register: ReadableRegister) -> RegisterAddress {
-        RegisterAddress::Mmio({
-            // Safety: `self.base` is required to be a valid base address, `register` is a
-            //         valid offset, and `self.stride` is required to be the distance (in bytes)
-            //         between each UART register.
-            unsafe { self.base.add((register as usize) * self.stride) }
-        })
+    unsafe fn write(&self, register: WriteableRegister, value: u8) {
+        // Safety: - `self.base` is required to be a valid base address.
+        //         - `register` is a valid offset.
+        //         - `self.stride` is required to be the distance (in bytes) between each UART register.
+        //         - Writing `value` is required to not cause undefined behaviour.
+        unsafe {
+            self.base
+                .byte_add((register as usize) * self.stride)
+                .write_volatile(value);
+        }
     }
 
-    fn get_write_address(&self, register: WriteableRegister) -> RegisterAddress {
-        RegisterAddress::Mmio({
-            // Safety: `self.base` is required to be a valid base address, `register` is a
-            //         valid offset, and `self.stride` is required to be the distance (in bytes)
-            //         between each UART register.
-            unsafe { self.base.add((register as usize) * self.stride) }
-        })
+    unsafe fn read(&self, register: ReadableRegister) -> u8 {
+        // Safety: - `self.base` is required to be a valid base address.
+        //         - `register` is a valid offset.
+        //         - `self.stride` is required to be the distance (in bytes) between each UART register.
+        //         - Reading `value` is required to not cause undefined behaviour.
+        unsafe {
+            self.base
+                .byte_add((register as usize) * self.stride)
+                .read_volatile()
+        }
     }
 }

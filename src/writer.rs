@@ -71,7 +71,9 @@ impl<A: UartAddress> core::fmt::Write for UartWriter<A> {
     }
 
     fn write_char(&mut self, c: char) -> core::fmt::Result {
-        while !self.0.read_line_status().contains(LineStatus::THR_EMPTY) {
+        // Safety: UART is not configured to have interrupts enabled, so cannot accidentally
+        //         clear the interrupt status register.
+        while !(unsafe { self.0.read_line_status() }).contains(LineStatus::THR_EMPTY) {
             core::hint::spin_loop();
         }
 

@@ -248,61 +248,98 @@ bitflags! {
     }
 }
 
-
-/// Represents the address of a UART register.
-///
-/// ## Remarks
-///
-/// It would be invalid for this to constructed with an incorrect / improper address.
-/// Given this, to my mind it should be unsafe to construct this value, as it *should*
-/// represent only valid UART register addresses. However, there isn't an idiomatic way
-/// to force `enum` construction to be unsafe—thus, it is up to the implementor to ensure
-/// this is not constructed with an invalid address.
-pub enum RegisterAddress {
-    Port(u16),
-    Mmio(*mut u8),
-}
-
-/// The read-enabled UART registers and their order.
-#[repr(u16)]
+/// The read-enabled UART registers and their offset index.
 #[derive(Debug, Clone, Copy)]
 pub enum ReadableRegister {
-    ReceiverHolding = 0x0,
-    InterruptEnable = 0x1,
-    InterruptStatus = 0x2,
-    LineControl = 0x3,
-    LineStatus = 0x5,
-    ModemStatus = 0x6,
+    ReceiverHolding,
+    InterruptEnable,
+    InterruptStatus,
+    LineControl,
+    LineStatus,
+    ModemStatus,
+
+    DivisorLatchLow,
+    DivisorLatchHigh,
 }
 
-/// The write-enabled UART registers and their order.
+impl ReadableRegister {
+    /// Offset index of the provided [`ReadableRegister`].
+    pub const fn as_index(self) -> u16 {
+        match self {
+            ReadableRegister::ReceiverHolding | ReadableRegister::DivisorLatchLow => 0x0,
+            ReadableRegister::InterruptEnable | ReadableRegister::DivisorLatchHigh => 0x1,
+            ReadableRegister::InterruptStatus => 0x2,
+            ReadableRegister::LineControl => 0x3,
+            ReadableRegister::LineStatus => 0x5,
+            ReadableRegister::ModemStatus => 0x6,
+        }
+    }
+}
+
+/// The write-enabled UART registers and their offset index.
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 pub enum WriteableRegister {
-    TransmitterHolding = 0x0,
-    InterruptEnable = 0x1,
-    FifoControl = 0x2,
-    LineControl = 0x3,
-    ModemControl = 0x4,
+    TransmitterHolding,
+    InterruptEnable,
+    FifoControl,
+    LineControl,
+    ModemControl,
+
+    DivisorLatchLow,
+    DivisorLatchHigh,
+}
+
+impl WriteableRegister {
+    /// Offset index of the provided [`WriteableRegister`].
+    pub const fn as_index(self) -> u16 {
+        match self {
+            WriteableRegister::TransmitterHolding | WriteableRegister::DivisorLatchLow => 0x0,
+            WriteableRegister::InterruptEnable | WriteableRegister::DivisorLatchHigh => 0x1,
+            WriteableRegister::FifoControl => 0x2,
+            WriteableRegister::LineControl => 0x3,
+            WriteableRegister::ModemControl => 0x4,
+        }
+    }
 }
 
 /// Represents an address type for a UART device, allowing idiomatic access to register
 /// addresses, and allowing any number of constraints to be encoded based on the hardware
 /// implemenation of the UART IO (whether port or memory mapped).
 ///
-/// ## Safety
+/// # Safety
 ///
-/// - The type may only be constructed only with a valid UART base address.
-/// - Ensure returned addresses are valid to read or write the register
-///   passed in [`UartAddress::get_read_address`] or [`UartAddress::get_write_address`].
+/// - The type implementing this trait should only be constructed with a valid UART base
+///   address (this may be a safety invariant on an `unsafe fn` constructor).
 pub unsafe trait UartAddress {
-    fn get_read_address(&self, register: ReadableRegister) -> RegisterAddress;
-    fn get_write_address(&self, register: WriteableRegister) -> RegisterAddress;
+    /// Writes `value` to `register`.
+    ///
+    /// # Safety
+    ///
+    /// - Writing `value` to the provided `register` has the potential to change
+    ///   the value of other registers. For instance, writing [`FifoControl::CLEAR_TX`] will
+    ///   change the contents of (in this case, zero out) [`WriteableRegister::TransmitterHolding`].
+    unsafe fn write(&self, register: WriteableRegister, value: u8);
+
+    /// Reads a raw [`u8`] from `register`.
+    ///
+    /// # Safety
+    ///
+    /// - Reading a value from certain registers will affect the contents of others.
+    ///   For instance, reading the line status will always clear the [`InterruptStatus::INTERRUPT_PENDING`] bit.
+    ///   Because of this, any calling context that passes [`ReadableRegister::LineStatus`] should be `&mut self`, or
+    ///   otherwise exclusively alias the address that is being read from.
+    unsafe fn read(&self, register: ReadableRegister) -> u8;
 }
 
+/// Identifies which mode a UART is in ([`Data`] or [`DLAB`]).
 pub trait Mode {}
+
+/// Data operation mode (rx/tx) for UART.
 pub struct Data;
 impl Mode for Data {}
+
+/// Divisor latch configuration mode for UART.
 pub struct DLAB;
 impl Mode for DLAB {}
 
@@ -312,120 +349,108 @@ pub struct Uart<A: UartAddress, M: Mode> {
 }
 
 impl<A: UartAddress, M: Mode> Uart<A, M> {
-    fn read(&self, register: ReadableRegister) -> u8 {
-        match self.base_address.get_read_address(register) {
-            RegisterAddress::Port(port_address) => {
-                let value: u8;
-
-                #[cfg(target_arch = "x86_64")]
-                // Safety: `UartAddress::get_read_address` must ensure `port_address` is valid for reading as UART register.
-                unsafe {
-                    core::arch::asm!(
-                        "in al, dx",
-                        out("al") value,
-                        in("dx") port_address,
-                        options(nostack, nomem, preserves_flags)
-                    );
-                }
-
-                #[cfg(not(target_arch = "x86_64"))]
-                unimplemented!();
-
-                value
-            }
-
-            RegisterAddress::Mmio(mmio_address) => {
-                // Safety: `UartAddress::get_read_address` must ensure `mmio_address` is valid for reading as UART register.
-                unsafe { mmio_address.read_volatile() }
-            }
-        }
-    }
-
-    fn write(&mut self, register: WriteableRegister, value: u8) {
-        match self.base_address.get_write_address(register) {
-            RegisterAddress::Port(port_address) => {
-                #[cfg(target_arch = "x86_64")]
-                // Safety: `UartAddress::get_write_address` must ensure `port_address` is valid for writing as UART register.
-                unsafe {
-                    core::arch::asm!(
-                        "out dx, al",
-                        in("dx") port_address,
-                        in("al") value,
-                        options(nostack, nomem, preserves_flags)
-                    );
-                }
-
-                #[cfg(not(target_arch = "x86_64"))]
-                unimplemented!();
-            }
-
-            RegisterAddress::Mmio(mmio_address) => {
-                // Safety: `UartAddress::get_write_address` must ensure `mmio_address` is valid for writing as UART register.
-                unsafe { mmio_address.write_volatile(value) }
-            }
-        }
-    }
-
     /// Read from the interrupt status register.
     pub fn read_interrupt_status(&self) -> InterruptStatus {
-        InterruptStatus::from_bits_retain(self.read(ReadableRegister::InterruptStatus))
+        // Safety: Reading the interrupt status register has no side effects, so `self` is immutably aliased.
+        let value = unsafe { self.base_address.read(ReadableRegister::InterruptStatus) };
+
+        InterruptStatus::from_bits_retain(value)
     }
 
     /// Write to the FIFO control register.
     pub fn write_fifo_control(&mut self, fifo_control: FifoControl) {
-        self.write(WriteableRegister::FifoControl, fifo_control.bits());
+        // Safety: Writing the FIFO control register has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::FifoControl, fifo_control.bits());
+        }
     }
 
     /// Read from the line control register.
     pub fn read_line_control(&self) -> LineControl {
+        // Safety: Reading the line control register has no side effects, so `self` is immutably aliased.
+        let value = unsafe { self.base_address.read(ReadableRegister::LineControl) };
+
         // Safety: `self.read(...)` returns a single byte, of which `LineControl` uses all bits (so no unknown bits are possible).
-        unsafe {
-            LineControl::from_bits(self.read(ReadableRegister::LineControl)).unwrap_unchecked()
-        }
+        unsafe { LineControl::from_bits(value).unwrap_unchecked() }
     }
 
     /// Write to the line control register.
     pub fn write_line_control(&mut self, value: LineControl) {
-        self.write(WriteableRegister::LineControl, value.bits());
+        // Safety: Writing the line control register has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::LineControl, value.bits());
+        }
     }
 
     /// Write to the modem control register.
     pub fn write_modem_control(&mut self, value: ModemControl) {
-        self.write(WriteableRegister::ModemControl, value.bits());
+        // Safety: Writing the modem control register has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::ModemControl, value.bits());
+        }
     }
 
     /// Read from the line status register.
-    pub fn read_line_status(&self) -> LineStatus {
-        LineStatus::from_bits_truncate(self.read(ReadableRegister::LineStatus))
+    pub fn read_line_status(&mut self) -> LineStatus {
+        // Safety: Reading the line status register has side effects, so `self` is mutably aliased.
+        let value = unsafe { self.base_address.read(ReadableRegister::LineStatus) };
+
+        LineStatus::from_bits_retain(value)
     }
 
     /// Read from the modem status register.
     pub fn read_modem_status(&self) -> ModemStatus {
-        ModemStatus::from_bits_truncate(self.read(ReadableRegister::ModemStatus))
+        // Safety: Reading the modem status register has no side effects, so `self` is immutably aliased.
+        let value = unsafe { self.base_address.read(ReadableRegister::ModemStatus) };
+
+        ModemStatus::from_bits_retain(value)
     }
 }
 
 impl<A: UartAddress> Uart<A, DLAB> {
+    /// Creates a new [`Uart`] pointing to `base_address`.
+    ///
+    /// # Safety
+    ///
+    /// - Provided address must be valid as the base address of a UART device.
+    /// - Provided address must not be otherwise mutably aliased.
+    /// - Device must have bit 7 of the line control register (DLAB enable) set to 1.
+    pub unsafe fn new(base_address: A) -> Self {
+        Self {
+            base_address,
+            marker: PhantomData,
+        }
+    }
+
     /// Read from the divisor latch from the 1st & 2nd registers.
     fn read_divisor_latch(&self) -> u16 {
-        // When DLAB is enabled, RHR and IER become the LSB and MSB of the
-        // divisor latch register, respectively.
+        // When DLAB is enabled, offset index 1 and 2 become the least- and most- significant bits of the divisor latch, respectively.
 
-        let lsb = u16::from(self.read(ReadableRegister::ReceiverHolding));
-        let msb = u16::from(self.read(ReadableRegister::InterruptEnable));
+        // Safety: While in DLAB mode, there are no side effects to reading the divisor latch registers, so `self` is immutably aliased.
+        unsafe {
+            let lsb = u16::from(self.base_address.read(ReadableRegister::ReceiverHolding));
+            let msb = u16::from(self.base_address.read(ReadableRegister::InterruptEnable));
 
-        (msb << 8) | lsb
+            (msb << 8) | lsb
+        }
     }
 
     /// Write the divisor latch to the 1st & 2nd registers.
     fn write_divisor_latch(&mut self, value: u16) {
-        // When DLAB is enabled, THR and IER become the LSB and MSB of the
-        // divisor latch register, respectively.
+        // When DLAB is enabled, offset index 1 and 2 become the least- and most- significant bits of the divisor latch, respectively.
 
         let value_le_bytes = value.to_le_bytes();
 
-        self.write(WriteableRegister::TransmitterHolding, value_le_bytes[0]);
-        self.write(WriteableRegister::InterruptEnable, value_le_bytes[1]);
+        // Safety: Writing to the divisor latch registers  While in DLAB mode, there are no side effects to reading the divisor latch registers, so `self` is immutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::TransmitterHolding, value_le_bytes[0]);
+            self.base_address
+                .write(WriteableRegister::InterruptEnable, value_le_bytes[1]);
+        }
     }
 
     /// Read from the baud rate from the divisor latch registers.
@@ -451,11 +476,15 @@ impl<A: UartAddress> Uart<A, DLAB> {
     }
 
     /// Disables access to the divisor latch registers.
-    pub fn into_data_mode(mut self) -> Uart<A, Data> {
+    pub fn into_data_mode(self) -> Uart<A, Data> {
         let mut line_control = self.read_line_control();
         line_control.remove(LineControl::DLAB);
 
-        self.write(WriteableRegister::LineControl, line_control.bits());
+        // Safety: Unsetting the DLAB bit has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::LineControl, line_control.bits());
+        }
 
         Uart::<A, Data> {
             base_address: self.base_address,
@@ -465,10 +494,11 @@ impl<A: UartAddress> Uart<A, DLAB> {
 }
 
 impl<A: UartAddress> Uart<A, Data> {
-    /// ### Safety
+    /// Creates a new [`Uart`] pointing to `base_address`.
     ///
-    /// - Provided address must be valid as the base address of a UART device.
-    /// - Provided address must not be otherwise mutably aliased.
+    /// # Safety
+    ///
+    /// - UART must have bit 7 of the line control register (DLAB enable) set to 0.
     pub unsafe fn new(base_address: A) -> Self {
         Self {
             base_address,
@@ -476,32 +506,60 @@ impl<A: UartAddress> Uart<A, Data> {
         }
     }
 
-    /// Reads a byte from the 1st register (RHR).
-    pub fn read_byte(&self) -> u8 {
-        self.read(ReadableRegister::ReceiverHolding)
+    /// Creates a new [`Uart`] pointing to `base_address`, and resets all the control and holding registers.
+    pub fn new_reset(base_address: A) -> Self {
+        // Safety: We're going to reset the device, so we don't care if it's correct or not.
+        let mut uart = unsafe { Self::new(base_address) };
+
+        uart.write_fifo_control(FifoControl::CLEAR_RX | FifoControl::CLEAR_TX);
+        uart.write_line_control(LineControl::empty());
+        uart.write_modem_control(ModemControl::empty());
+
+        uart
     }
 
-    /// Writes a byte to the 2nd register (THR).
+    /// Reads a byte from the receiver holding register.
+    pub fn read_byte(&mut self) -> u8 {
+        // Safety: Reading from the receiver holding register clears it, so `self` is mutably aliased.
+        unsafe { self.base_address.read(ReadableRegister::ReceiverHolding) }
+    }
+
+    /// Writes a byte to the transmitter holding register
     pub fn write_byte(&mut self, byte: u8) {
-        self.write(WriteableRegister::TransmitterHolding, byte);
+        // Safety: Writing to the transmitter holding register sets it, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::TransmitterHolding, byte);
+        }
     }
 
     /// Reads from the interrupt enable register.
     pub fn read_interrupt_enable(&self) -> InterruptEnable {
-        InterruptEnable::from_bits_truncate(self.read(ReadableRegister::InterruptEnable))
+        // Safety: Reading the interrupt enable register has no side effects, so `self` is immutably aliased.
+        let value = unsafe { self.base_address.read(ReadableRegister::InterruptEnable) };
+
+        InterruptEnable::from_bits_retain(value)
     }
 
     /// Writes to the interrupt enable register.
     pub fn write_interrupt_enable(&mut self, value: InterruptEnable) {
-        self.write(WriteableRegister::InterruptEnable, value.bits());
+        // Safety: Writing the interrupt enable register has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::InterruptEnable, value.bits());
+        }
     }
 
     /// Enables access to the divisor latch registers.
-    pub fn into_dlab_mode(mut self) -> Uart<A, DLAB> {
+    pub fn into_dlab_mode(self) -> Uart<A, DLAB> {
         let mut line_control = self.read_line_control();
         line_control.insert(LineControl::DLAB);
 
-        self.write(WriteableRegister::LineControl, line_control.bits());
+        // Safety: Setting the DLAB bit has side effects, so `self` is mutably aliased.
+        unsafe {
+            self.base_address
+                .write(WriteableRegister::LineControl, line_control.bits());
+        }
 
         Uart::<A, DLAB> {
             base_address: self.base_address,
