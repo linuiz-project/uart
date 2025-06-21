@@ -77,19 +77,51 @@ bitflags! {
 }
 
 /// Serial port speed, measured in bauds.
-#[repr(u16)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Baud {
-    B115200 = 1,
-    B57600 = 2,
-    B38400 = 3,
-    B19200 = 6,
-    B9600 = 12,
-    B4800 = 24,
-    B2400 = 48,
-    B1200 = 96,
-    B300 = 384,
-    B50 = 2304,
+    B115200,
+    B57600,
+    B38400,
+    B19200,
+    B9600,
+    B4800,
+    B2400,
+    B1200,
+    B300,
+    B50,
+}
+
+impl Baud {
+    pub fn from_register_value(value: u16) -> Self {
+        match value {
+            1 => Self::B115200,
+            2 => Self::B57600,
+            3 => Self::B38400,
+            6 => Self::B19200,
+            12 => Self::B9600,
+            24 => Self::B4800,
+            48 => Self::B2400,
+            96 => Self::B1200,
+            384 => Self::B300,
+            2304 => Self::B50,
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn into_register_value(self) -> u16 {
+        match self {
+            Baud::B115200 => 1,
+            Baud::B57600 => 2,
+            Baud::B38400 => 3,
+            Baud::B19200 => 6,
+            Baud::B9600 => 12,
+            Baud::B4800 => 24,
+            Baud::B2400 => 48,
+            Baud::B1200 => 96,
+            Baud::B300 => 384,
+            Baud::B50 => 2304,
+        }
+    }
 }
 
 bitflags! {
@@ -398,7 +430,8 @@ impl<A: UartAddress, M: Mode> Uart<A, M> {
         // Safety: Reading the line status register has side effects, so `self` is mutably aliased.
         let value = unsafe { self.base_address.read(ReadableRegister::LineStatus) };
 
-        LineStatus::from_bits_retain(value)
+        // Safety: `self.read(...)` returns a single byte, of which `LineStatus` uses all bits (so no unknown bits are possible).
+        unsafe { LineStatus::from_bits(value).unwrap_unchecked() }
     }
 
     /// Read from the modem status register.
@@ -454,25 +487,14 @@ impl<A: UartAddress> Uart<A, DLAB> {
     }
 
     /// Read from the baud rate from the divisor latch registers.
+    #[allow(clippy::missing_panics_doc)]
     pub fn get_baud(&self) -> Baud {
-        match self.read_divisor_latch() {
-            1 => Baud::B115200,
-            2 => Baud::B57600,
-            3 => Baud::B38400,
-            6 => Baud::B19200,
-            12 => Baud::B9600,
-            24 => Baud::B4800,
-            48 => Baud::B2400,
-            96 => Baud::B1200,
-            384 => Baud::B300,
-            2304 => Baud::B50,
-            _ => unimplemented!(),
-        }
+        Baud::from_register_value(self.read_divisor_latch())
     }
 
     /// Set the baud rate using the divisor latch registers.
     pub fn set_baud(&mut self, baud: Baud) {
-        self.write_divisor_latch(baud as u16);
+        self.write_divisor_latch(baud.into_register_value());
     }
 
     /// Disables access to the divisor latch registers.
