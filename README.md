@@ -8,7 +8,7 @@ This crate aims for full implementation support of features from the [16550 UART
 
 Below is an example of a `core::fmt::Write`-implementing type that initializes, tests, and is able to write to a UART.
 
-***note**: found at `uart::writer::UartWriter`, enabled by default feature `"writer"`.*
+***note**: found at `uart::writer::UartWriter`, enabled by default feature `"writer_impl"`.*
 
 ```rust
 use crate::{
@@ -93,7 +93,7 @@ Notably, the above implementation is I/O-agnostic, and uses the crate features t
 
 ### Port-mapped I/O
 
-***note**: found at `uart::address::PortAddress`, enabled by default feature `"address"`.*
+***note**: found at `uart::address::PortAddress`, enabled by default feature `"address_impl"`.*
 
 ```rust
 use crate::{ReadableRegister, RegisterAddress, UartAddress, WriteableRegister};
@@ -158,7 +158,7 @@ unsafe impl UartAddress for PortAddress {
 
 ### Memory-mapped I/O
 
-***note**: found at `uart::address::MmioAddress`, enabled by default feature `"address"`.*
+***note**: found at `uart::address::MmioAddress`, enabled by default feature `"address_impl"`.*
 
 ```rust
 use crate::{ReadableRegister, RegisterAddress, UartAddress, WriteableRegister};
