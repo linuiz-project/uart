@@ -1,3 +1,7 @@
+# THIS REPOSITORY HAS BEEN MOVED TO [CODEBERG](https://codeberg.org/linuiz-project/uart).
+
+The _Linuiz Project_ does not support GitHub's decisions to scrape all of the code hosted on its platform for usage within large language models (LLMs). The environmental, community, psychological, and economic impact of LLMs is far beyond what such a largely pointless and wasteful technology should merit. Technology, and its accompanying software, should strive to _solve_ the problems of our society, rather than creating entirely new systemic risks for us all.
+
 # UART
 
 The [Universional Asynchronous Receiver-Transmitter](https://en.wikipedia.org/wiki/Universal_asynchronous_receiver-transmitter) (UART for short) is an asychronous serial communication device found in most computers, often including even embedded or IoT devices. It is a ubiquoutous model/specification to allow communication between two devices through a serial port.
